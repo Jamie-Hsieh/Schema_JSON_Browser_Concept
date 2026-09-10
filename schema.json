@@ -1,0 +1,574 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jamie Simple Engineering Extraction Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "parts",
+    "attributes",
+    "relationships",
+    "issues",
+    "requirements",
+    "document_references",
+    "expected_information_check"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.1"
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/part"
+      }
+    },
+    "attributes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/attribute"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relationship"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requirement"
+      }
+    },
+    "document_references": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/document_reference"
+      }
+    },
+    "expected_information_check": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/expected_information_item"
+      }
+    }
+  },
+  "$defs": {
+    "machine_name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document",
+        "section",
+        "page",
+        "quote"
+      ],
+      "properties": {
+        "document": {
+          "type": "string"
+        },
+        "section": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "display_name",
+        "parent_id",
+        "boundary_role",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "name": {
+          "$ref": "#/$defs/machine_name"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "boundary_role": {
+          "enum": [
+            "system",
+            "internal",
+            "external",
+            "unknown"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "attribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner_id",
+        "name",
+        "value",
+        "unit",
+        "unit_status",
+        "value_role",
+        "lower_bound",
+        "upper_bound",
+        "conditions",
+        "value_status",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^attr_[a-z0-9_]+$"
+        },
+        "owner_id": {
+          "type": "string",
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "name": {
+          "$ref": "#/$defs/machine_name"
+        },
+        "value": {
+          "type": [
+            "number",
+            "boolean",
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_status": {
+          "enum": [
+            "specified",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "value_role": {
+          "enum": [
+            "nominal",
+            "rated",
+            "minimum",
+            "maximum",
+            "range",
+            "actual",
+            "unspecified"
+          ]
+        },
+        "lower_bound": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "upper_bound": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "conditions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_status": {
+          "enum": [
+            "specified",
+            "unknown",
+            "conflicting"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "unit_status": {
+                "const": "specified"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "unit": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "unit": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "value_status": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "lower_bound": {
+                "type": "null"
+              },
+              "upper_bound": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "from_id",
+        "to_id",
+        "direction",
+        "domain",
+        "description",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^rel_[a-z0-9_]+$"
+        },
+        "kind": {
+          "enum": [
+            "connected_to",
+            "flows_to",
+            "drives",
+            "controls",
+            "monitors",
+            "other"
+          ]
+        },
+        "from_id": {
+          "type": "string",
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "to_id": {
+          "type": "string",
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "direction": {
+          "enum": [
+            "from_to",
+            "bidirectional",
+            "unspecified"
+          ]
+        },
+        "domain": {
+          "enum": [
+            "electrical",
+            "mechanical",
+            "hydraulic",
+            "pneumatic",
+            "thermal",
+            "data",
+            "control",
+            "structural",
+            "other",
+            null
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "related_ids",
+        "description",
+        "information_needed",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^issue_[a-z0-9_]+$"
+        },
+        "kind": {
+          "enum": [
+            "missing_value",
+            "unresolved_applicability",
+            "conflict",
+            "unavailable_reference",
+            "extraction_limitation",
+            "modeling_question",
+            "schema_limitation",
+            "unrecognized_concept"
+          ]
+        },
+        "related_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "information_needed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_identifier",
+        "text",
+        "applies_to_ids",
+        "applicability",
+        "conditions",
+        "verification_methods",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^req_[a-z0-9_]+$"
+        },
+        "source_identifier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "applies_to_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^part_[a-z0-9_]+$"
+          }
+        },
+        "applicability": {
+          "enum": [
+            "applicable",
+            "conditional",
+            "unresolved"
+          ]
+        },
+        "conditions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verification_methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "document_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "document_number",
+        "title",
+        "revision",
+        "availability",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^ref_[a-z0-9_]+$"
+        },
+        "document_number": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "availability": {
+          "enum": [
+            "supplied",
+            "not_supplied"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "expected_information_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_id",
+        "attribute_name",
+        "expected_because",
+        "status",
+        "attribute_id",
+        "issue_id",
+        "sources"
+      ],
+      "properties": {
+        "owner_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^part_[a-z0-9_]+$"
+        },
+        "attribute_name": {
+          "$ref": "#/$defs/machine_name"
+        },
+        "expected_because": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "missing",
+            "conflicting"
+          ]
+        },
+        "attribute_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^attr_[a-z0-9_]+$"
+        },
+        "issue_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^issue_[a-z0-9_]+$"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    }
+  },
+  "$comment": "Project-defined intermediate format, not a universal SysML schema. Preserves original part, attribute, relationship and issue record structures. External checks must verify ID uniqueness, reference existence, ownership cycles, bound ordering, source accuracy and extraction completeness."
+}
