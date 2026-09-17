@@ -15,7 +15,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.3"
+      "const": "1.1"
     },
     "parts": {
       "type": "array",
@@ -160,9 +160,7 @@
         "upper_bound",
         "conditions",
         "value_status",
-        "sources",
-        "record_status",
-        "supersedes_id"
+        "sources"
       ],
       "properties": {
         "id": {
@@ -239,21 +237,6 @@
           "items": {
             "$ref": "#/$defs/source"
           }
-        },
-        "record_status": {
-          "enum": [
-            "current",
-            "superseded"
-          ],
-          "description": "Whether this attribute record remains in the current information set or has been replaced. Read together with value_status: current does not imply a known or verified value."
-        },
-        "supersedes_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^attr_[a-z0-9_]+$",
-          "description": "ID of the previous attribute record explicitly replaced by this assertion; null when none. Existence, matching scope, and acyclic links require checks outside JSON Schema."
         }
       },
       "allOf": [

@@ -16,7 +16,13 @@ COLLECTIONS = ['parts', 'attributes', 'relationships', 'requirements', 'issues',
 def load_model(raw):
     """Validate before rendering; never modify the source model."""
     data = json.loads(raw.decode('utf-8-sig'))
-    schema = json.loads((ROOT / 'schema.json').read_text(encoding='utf-8'))
+    if not isinstance(data, dict):
+        raise ValueError('Expected an extraction object, not a list or schema document.')
+    version = data.get('schema_version')
+    schemas = {'1.1': 'schema_v1_1.json', '1.3': 'schema_v1_3.json'}
+    if version not in schemas:
+        raise ValueError(f'Unsupported schema_version: {version!r}. Supported: 1.1, 1.3. Upload an extraction, not the schema definition.')
+    schema = json.loads((ROOT / schemas[version]).read_text(encoding='utf-8'))
     errors = [f"{'/'.join(map(str, e.absolute_path)) or '/'}: {e.message}"
               for e in Draft202012Validator(schema).iter_errors(data)]
     if errors:
@@ -50,7 +56,89 @@ def load_model(raw):
             warnings.append(f"Checklist link mismatch: {r['attribute_name']}")
         if r['issue_id'] and r['issue_id'] not in index:
             warnings.append(f"Missing checklist issue: {r['issue_id']}")
+    warnings.extend(revision_warnings(data))
     return data, index, list(dict.fromkeys(warnings))
+
+
+def revision_warnings(data):
+    attrs = {a['id']: a for a in data['attributes']}
+    warnings = []
+    children = {}
+    for a in attrs.values():
+        previous = a.get('supersedes_id')
+        if previous:
+            children.setdefault(previous, []).append(a['id'])
+            old = attrs.get(previous)
+            if old is None:
+                warnings.append(f"{a['id']}: supersedes_id does not reference an attribute: {previous}")
+            else:
+                if old.get('record_status') != 'superseded':
+                    warnings.append(f"{a['id']}: predecessor {previous} is not marked superseded.")
+                if (a['owner_id'], a['name']) != (old['owner_id'], old['name']):
+                    warnings.append(f"{a['id']}: replacement owner/name differs from {previous}; review scope.")
+                if (a['conditions'], a['value_role']) != (old['conditions'], old['value_role']):
+                    warnings.append(f"{a['id']}: conditions or value role changed from {previous}; review scope.")
+        seen = {a['id']}
+        while previous in attrs:
+            if previous in seen:
+                warnings.append(f"Revision cycle involving {a['id']}.")
+                break
+            seen.add(previous)
+            previous = attrs[previous].get('supersedes_id')
+    for target, replacements in children.items():
+        if len(replacements) > 1:
+            warnings.append(f"{target}: multiple direct replacements: {', '.join(replacements)}")
+    for a in attrs.values():
+        if a.get('record_status') == 'superseded' and a['id'] not in children:
+            warnings.append(f"{a['id']}: marked superseded but no replacement is recorded.")
+    for c in data['expected_information_check']:
+        if c['attribute_id'] in attrs and attrs[c['attribute_id']].get('record_status') == 'superseded':
+            warnings.append(f"Checklist {c['attribute_name']} points to superseded attribute {c['attribute_id']}.")
+    return warnings
+
+
+def revision_family(attribute_id, index):
+    attrs = {k: v for k, v in index.items() if k.startswith('attr_')}
+    ids = {attribute_id}
+    while True:
+        expanded = ids | {a['id'] for a in attrs.values() if a.get('supersedes_id') in ids}
+        expanded |= {attrs[i]['supersedes_id'] for i in ids if i in attrs and attrs[i].get('supersedes_id') in attrs}
+        if expanded == ids:
+            return [attrs[i] for i in sorted(ids) if i in attrs]
+        ids = expanded
+
+
+def revision_panel(record, index, key):
+    family = revision_family(record['id'], index)
+    st.subheader('Revision history')
+    st.caption('Arrows run from previous assertion to replacement. Current is independent of whether a value is known or verified. No chronological dates are inferred.')
+    graph = graphviz.Digraph(graph_attr={'rankdir': 'TB'})
+    for a in family:
+        graph.node(a['id'], a['id'] + '\n' + value_text(a) + '\n' + a.get('record_status', 'not recorded'),
+                   style='filled', fillcolor='#dcfce7' if a.get('record_status') == 'current' else '#f1f5f9')
+    for a in family:
+        if a.get('supersedes_id'):
+            graph.edge(a['supersedes_id'], a['id'], label='replaced by')
+    st.graphviz_chart(graph, width='stretch')
+    ids = [a['id'] for a in family]
+    selected = st.selectbox('Inspect a revision', ids, index=ids.index(record['id']), key=key+'_revision')
+    a = index[selected]
+    st.text(f"{a['id']} | {a.get('record_status', 'not recorded')} | {a['value_status']} | {value_text(a)}")
+    old = index.get(a.get('supersedes_id'))
+    if old:
+        fields = ['value', 'unit', 'unit_status', 'value_role', 'lower_bound', 'upper_bound', 'value_status', 'conditions', 'record_status']
+        st.dataframe(pd.DataFrame([{'Field': f, 'Previous': json.dumps(old.get(f), ensure_ascii=False),
+                                  'Selected': json.dumps(a.get(f), ensure_ascii=False),
+                                  'Changed': old.get(f) != a.get(f)} for f in fields]), hide_index=True, width='stretch')
+        left, right = st.columns(2)
+        with left:
+            st.markdown('**Previous evidence**'); evidence(old['sources'])
+        with right:
+            st.markdown('**Selected evidence**'); evidence(a['sources'])
+    else:
+        st.caption('No available predecessor.'); evidence(a['sources'])
+    with st.expander('Selected revision JSON'):
+        st.json(a)
 
 
 def value_text(r):
@@ -106,7 +194,7 @@ def evidence(sources):
 
 def detail(r, index):
     st.subheader(r.get('id', r.get('attribute_name', 'Record')))
-    for field in ('value_status', 'value_role', 'applicability', 'kind', 'status'):
+    for field in ('record_status', 'value_status', 'value_role', 'applicability', 'kind', 'status'):
         if field in r:
             st.text(f"{field.replace('_', ' ').title()}: {r[field]}")
     if 'value' in r:
@@ -120,7 +208,7 @@ def detail(r, index):
     with st.expander('Source evidence', expanded=True):
         evidence(r.get('sources', []))
     links = []
-    for field in ('owner_id', 'parent_id', 'from_id', 'to_id', 'attribute_id', 'issue_id'):
+    for field in ('owner_id', 'parent_id', 'from_id', 'to_id', 'attribute_id', 'issue_id', 'supersedes_id'):
         if r.get(field):
             links.append(r[field])
     links += r.get('related_ids', []) + r.get('applies_to_ids', [])
@@ -137,6 +225,11 @@ def detail(r, index):
 
 
 def table_browser(records, kind, index, token):
+    if kind == 'attributes':
+        mode = st.radio('Revision status', ['Current', 'Superseded', 'All'], horizontal=True, key=f'{token}_revision_filter')
+        if mode != 'All':
+            records = [r for r in records if r.get('record_status', 'current') == mode.lower()]
+        st.caption('For schema 1.1, records are shown under Current for browsing only; revision status was not recorded.')
     status_field = {'attributes': 'value_status', 'requirements': 'applicability',
                     'issues': 'kind', 'expected_information_check': 'status',
                     'document_references': 'availability', 'parts': 'boundary_role',
@@ -158,7 +251,7 @@ def table_browser(records, kind, index, token):
         row['source_documents'] = '; '.join(dict.fromkeys(s['document'] for s in r['sources']))
         rows.append(row)
     frame = pd.DataFrame(rows)
-    preferred = ['id', 'attribute_name', 'name', 'display_value', status_field, 'conditions', 'description', 'text']
+    preferred = ['id', 'attribute_name', 'name', 'display_value', 'record_status', status_field, 'conditions', 'description', 'text']
     cols = list(dict.fromkeys(c for c in preferred if c in frame.columns))
     cols += [c for c in frame.columns if c not in cols]
     fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()[:10]
@@ -174,33 +267,35 @@ def table_browser(records, kind, index, token):
                          format_func=lambda i: records[i].get('id', records[i].get('attribute_name', str(i))),
                          key=f'{token}_{kind}_{fingerprint}_{selection}_inspect')
     detail(records[which], index)
+    if kind == 'attributes' and 'record_status' in records[which]:
+        revision_panel(records[which], index, f'{token}_{kind}_{fingerprint}_{which}')
 
 
 def main():
     st.set_page_config(page_title='Engineering JSON Browser', page_icon='🔎', layout='wide')
     st.title('Engineering JSON Browser')
-    st.caption('Jamie Schema 1.1 · Trace requirements, equipment information, and source evidence')
+    st.caption('Jamie Schemas 1.3 & 1.1 · Trace requirements, equipment information, and source evidence')
     with st.sidebar:
         st.header('Open an extraction')
         upload = st.file_uploader('Upload JSON', type=['json'])
-        use_example = st.checkbox('Use bundled firstpass.json', value=True)
+        use_example = st.checkbox('Use bundled 1.3 example', value=True)
     if upload is not None:
         raw = upload.getvalue()
         filename = upload.name
-    elif use_example and (ROOT / 'firstpass.json').exists():
-        raw = (ROOT / 'firstpass.json').read_bytes()
-        filename = 'firstpass.json (bundled)'
+    elif use_example and (ROOT / 'output_v1.3.json').exists():
+        raw = (ROOT / 'output_v1.3.json').read_bytes()
+        filename = 'output_v1.3.json (bundled)'
     else:
         st.info('Upload a JSON extraction to begin.')
         return
     try:
         data, index, warnings = load_model(raw)
     except (ValueError, UnicodeError, OSError) as exc:
-        st.error('This file could not be loaded as a Jamie Schema 1.1 extraction.')
+        st.error('This file could not be loaded as a supported Jamie extraction.')
         st.code(str(exc))
         return
     token = hashlib.sha256(raw).hexdigest()[:12]
-    st.caption(f'Loaded: {filename} · Schema validation passed')
+    st.caption(f'Loaded: {filename} · Schema {data['schema_version']} validation passed')
     st.info('Recorded constraints and requirements do not establish selected equipment ratings or compliance. Check each record’s conditions and applicability.')
     if warnings:
         with st.expander(f'{len(warnings)} reference or containment warnings', expanded=True):
@@ -227,9 +322,33 @@ def main():
     metrics = st.columns(4)
     for col, k in zip(metrics, ['parts', 'attributes', 'requirements', 'issues']):
         col.metric(k.replace('_', ' ').title(), len(data[k]))
-    sections = ['Overview', 'Parts', 'Attributes', 'Relationships', 'Requirements', 'Issues', 'Missing information', 'References']
+    sections = ['Overview', 'Parts', 'Attributes', 'Relationships', 'Requirements', 'Issues', 'Missing information', 'References', 'Revision history']
     view = st.radio('View', sections, horizontal=True, key=f'{token}_view')
+    if view == 'Revision history':
+        if data['schema_version'] != '1.3':
+            st.info('This legacy 1.1 file does not record revision status or replacement links.')
+            return
+        candidates = scoped(data, 'attributes', ids)
+        if query:
+            candidates = [a for a in candidates if query in json.dumps(a, ensure_ascii=False).casefold()]
+        if document != 'All documents':
+            candidates = [a for a in candidates if any(s['document'] == document for s in a['sources'])]
+        if not candidates:
+            st.info('No matching revision records.')
+            return
+        target = st.selectbox('Attribute assertion', [a['id'] for a in candidates],
+                              format_func=lambda i: f"{index[i]['name']} — {value_text(index[i])} [{index[i]['record_status']}] · {i}",
+                              key=token+'_history_target')
+        st.caption('The full linked family is shown, including predecessors outside the search filters.')
+        revision_panel(index[target], index, token+'_history')
+        return
     if view == 'Overview':
+        if data['schema_version'] == '1.3':
+            attrs = scoped(data, 'attributes', ids)
+            cols = st.columns(3)
+            cols[0].metric('Current attributes in scope', sum(a['record_status'] == 'current' for a in attrs))
+            cols[1].metric('Superseded attributes in scope', sum(a['record_status'] == 'superseded' for a in attrs))
+            cols[2].metric('Unknown current values', sum(a['record_status'] == 'current' and a['value_status'] == 'unknown' for a in attrs))
         st.subheader('Part relationships')
         graph = graphviz.Digraph(graph_attr={'rankdir': 'TB'})
         rels = scoped(data, 'relationships', ids)
