@@ -1,4 +1,4 @@
-"""Read-only browser for Jamie Engineering Extraction Schemas 1.1, 1.3 and 1.4."""
+"""Read-only browser for Jamie Engineering Extraction Schema 1.1."""
 import hashlib
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ import streamlit as st
 from jsonschema import Draft202012Validator
 
 ROOT = Path(__file__).resolve().parent
-COLLECTIONS = ['parts', 'attributes', 'relationships', 'requirements', 'issues', 'potential_changes',
+COLLECTIONS = ['parts', 'attributes', 'relationships', 'requirements', 'issues',
                'document_references', 'expected_information_check']
 
 
@@ -19,15 +19,15 @@ def load_model(raw):
     if not isinstance(data, dict):
         raise ValueError('Expected an extraction object, not a list or schema document.')
     version = data.get('schema_version')
-    schemas = {'1.1': 'schema_v1_1.json', '1.3': 'schema_v1_3.json', '1.4': 'schema_v1_4.json'}
+    schemas = {'1.1': 'schema_v1_1.json', '1.3': 'schema_v1_3.json'}
     if version not in schemas:
-        raise ValueError(f'Unsupported schema_version: {version!r}. Supported: 1.1, 1.3, 1.4. Upload an extraction, not the schema definition.')
+        raise ValueError(f'Unsupported schema_version: {version!r}. Supported: 1.1, 1.3. Upload an extraction, not the schema definition.')
     schema = json.loads((ROOT / schemas[version]).read_text(encoding='utf-8'))
     errors = [f"{'/'.join(map(str, e.absolute_path)) or '/'}: {e.message}"
               for e in Draft202012Validator(schema).iter_errors(data)]
     if errors:
         raise ValueError('\n'.join(errors[:30]))
-    records = [r for k in COLLECTIONS for r in data.get(k, []) if 'id' in r]
+    records = [r for k in COLLECTIONS for r in data[k] if 'id' in r]
     index = {r['id']: r for r in records}
     warnings = []
     if len(index) != len(records):
@@ -164,7 +164,7 @@ def scope_ids(data, selected, descendants):
 
 def scoped(data, kind, ids):
     if not ids:
-        return data.get(kind, [])
+        return data[kind]
     linked = ids | {a['id'] for a in data['attributes'] if a['owner_id'] in ids}
     linked |= {r['id'] for r in data['requirements'] if set(r['applies_to_ids']) & ids}
     linked |= {r['id'] for r in data['relationships'] if r['from_id'] in ids or r['to_id'] in ids}
@@ -176,13 +176,9 @@ def scoped(data, kind, ids):
         return [r for r in data[kind] if set(r['applies_to_ids']) & ids]
     if kind == 'relationships':
         return [r for r in data[kind] if r['from_id'] in ids or r['to_id'] in ids]
-    if kind == 'potential_changes':
-        # Include proposals linked through an issue as well as directly to equipment.
-        linked |= {r['id'] for r in data['issues'] if set(r['related_ids']) & linked}
-        return [r for r in data.get(kind, []) if set(r['related_ids']) & linked]
     if kind == 'issues':
         return [r for r in data[kind] if set(r['related_ids']) & linked]
-    return data.get(kind, [])
+    return data[kind]
 
 
 def evidence(sources):
@@ -203,8 +199,7 @@ def detail(r, index):
             st.text(f"{field.replace('_', ' ').title()}: {r[field]}")
     if 'value' in r:
         st.metric('Recorded value', value_text(r))
-    for field in ('conditions', 'text', 'description', 'information_needed', 'expected_because',
-                  'proposed_change', 'rationale', 'confirmation_needed'):
+    for field in ('conditions', 'text', 'description', 'information_needed', 'expected_because'):
         if r.get(field):
             st.markdown(f"**{field.replace('_', ' ').title()}**")
             st.text(r[field])
@@ -238,12 +233,11 @@ def table_browser(records, kind, index, token):
     status_field = {'attributes': 'value_status', 'requirements': 'applicability',
                     'issues': 'kind', 'expected_information_check': 'status',
                     'document_references': 'availability', 'parts': 'boundary_role',
-                    'relationships': 'domain'}.get(kind)
-    if status_field:
-        options = sorted({r.get(status_field) or '(none)' for r in records})
-        selected = st.multiselect(status_field.replace('_', ' ').title(), options, key=f'{token}_{kind}_status')
-        if selected:
-            records = [r for r in records if (r.get(status_field) or '(none)') in selected]
+                    'relationships': 'domain'}[kind]
+    options = sorted({r.get(status_field) or '(none)' for r in records})
+    selected = st.multiselect(status_field.replace('_', ' ').title(), options, key=f'{token}_{kind}_status')
+    if selected:
+        records = [r for r in records if (r.get(status_field) or '(none)') in selected]
     st.caption(f'{len(records):,} matching records. Select a row to inspect its complete details.')
     if not records:
         st.info('No matching entries. Try another part or clear the filters.')
@@ -257,7 +251,7 @@ def table_browser(records, kind, index, token):
         row['source_documents'] = '; '.join(dict.fromkeys(s['document'] for s in r['sources']))
         rows.append(row)
     frame = pd.DataFrame(rows)
-    preferred = ['id', 'attribute_name', 'name', 'display_value', 'record_status', status_field, 'conditions', 'description', 'text', 'proposed_change', 'rationale', 'confirmation_needed']
+    preferred = ['id', 'attribute_name', 'name', 'display_value', 'record_status', status_field, 'conditions', 'description', 'text']
     cols = list(dict.fromkeys(c for c in preferred if c in frame.columns))
     cols += [c for c in frame.columns if c not in cols]
     fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()[:10]
@@ -280,7 +274,7 @@ def table_browser(records, kind, index, token):
 def main():
     st.set_page_config(page_title='Engineering JSON Browser', page_icon='🔎', layout='wide')
     st.title('Engineering JSON Browser')
-    st.caption('Jamie Schemas 1.4, 1.3 & 1.1 · Trace requirements, equipment information, and source evidence')
+    st.caption('Jamie Schemas 1.3 & 1.1 · Trace requirements, equipment information, and source evidence')
     with st.sidebar:
         st.header('Open an extraction')
         upload = st.file_uploader('Upload JSON', type=['json'])
@@ -301,7 +295,7 @@ def main():
         st.code(str(exc))
         return
     token = hashlib.sha256(raw).hexdigest()[:12]
-    st.caption(f"Loaded: {filename} · Schema {data['schema_version']} validation passed")
+    st.caption(f'Loaded: {filename} · Schema {data['schema_version']} validation passed')
     st.info('Recorded constraints and requirements do not establish selected equipment ratings or compliance. Check each record’s conditions and applicability.')
     if warnings:
         with st.expander(f'{len(warnings)} reference or containment warnings', expanded=True):
@@ -321,17 +315,17 @@ def main():
                               format_func=part_label, key=f'{token}_part')
         descendants = st.checkbox('Include contained parts', value=True)
         query = st.text_input('Search records and quotations', key=f'{token}_search').casefold().strip()
-        docs = sorted({s['document'] for k in COLLECTIONS for r in data.get(k, []) for s in r['sources']})
+        docs = sorted({s['document'] for k in COLLECTIONS for r in data[k] for s in r['sources']})
         document = st.selectbox('Source document', ['All documents'] + docs, key=f'{token}_doc')
-        st.caption('Part scope includes directly linked issues and proposals linked to the selected parts or those issues. Choose All parts for unallocated requirements and global issues. References always cover the whole model.')
+        st.caption('Part scope includes directly linked issues. Choose All parts for unallocated requirements and global issues. References always cover the whole model.')
     ids = scope_ids(data, chosen, descendants)
-    metrics = st.columns(5)
-    for col, k in zip(metrics, ['parts', 'attributes', 'requirements', 'issues', 'potential_changes']):
-        col.metric(k.replace('_', ' ').title(), len(data.get(k, [])))
-    sections = ['Overview', 'Parts', 'Attributes', 'Relationships', 'Requirements', 'Issues', 'Potential Changes', 'Missing information', 'References', 'Revision history']
+    metrics = st.columns(4)
+    for col, k in zip(metrics, ['parts', 'attributes', 'requirements', 'issues']):
+        col.metric(k.replace('_', ' ').title(), len(data[k]))
+    sections = ['Overview', 'Parts', 'Attributes', 'Relationships', 'Requirements', 'Issues', 'Missing information', 'References', 'Revision history']
     view = st.radio('View', sections, horizontal=True, key=f'{token}_view')
     if view == 'Revision history':
-        if data['schema_version'] not in ('1.3', '1.4'):
+        if data['schema_version'] != '1.3':
             st.info('This legacy 1.1 file does not record revision status or replacement links.')
             return
         candidates = scoped(data, 'attributes', ids)
@@ -349,7 +343,7 @@ def main():
         revision_panel(index[target], index, token+'_history')
         return
     if view == 'Overview':
-        if data['schema_version'] in ('1.3', '1.4'):
+        if data['schema_version'] == '1.3':
             attrs = scoped(data, 'attributes', ids)
             cols = st.columns(3)
             cols[0].metric('Current attributes in scope', sum(a['record_status'] == 'current' for a in attrs))
@@ -374,13 +368,8 @@ def main():
         st.download_button('Download complete original JSON', raw, 'extraction.json', 'application/json')
         return
     kind = {'Parts': 'parts', 'Attributes': 'attributes', 'Relationships': 'relationships',
-            'Requirements': 'requirements', 'Issues': 'issues', 'Potential Changes': 'potential_changes', 'Missing information': 'expected_information_check',
+            'Requirements': 'requirements', 'Issues': 'issues', 'Missing information': 'expected_information_check',
             'References': 'document_references'}[view]
-    if kind == 'potential_changes':
-        st.info('Unconfirmed proposals for review. These do not change established relationships, values, or requirement applicability.')
-        if data['schema_version'] != '1.4':
-            st.info('This schema version does not record Potential Changes.')
-            return
     records = scoped(data, kind, ids)
     if query:
         records = [r for r in records if query in json.dumps(r, ensure_ascii=False).casefold()]
