@@ -284,13 +284,13 @@ def main():
     with st.sidebar:
         st.header('Open an extraction')
         upload = st.file_uploader('Upload JSON', type=['json'])
-        use_example = st.checkbox('Use bundled 1.3 example', value=True)
+        use_example = st.checkbox('Use bundled 1.4 example', value=True)
     if upload is not None:
         raw = upload.getvalue()
         filename = upload.name
-    elif use_example and (ROOT / 'output_v1.3.json').exists():
-        raw = (ROOT / 'output_v1.3.json').read_bytes()
-        filename = 'output_v1.3.json (bundled)'
+    elif use_example and (ROOT / 'output_v1.4.json').exists():
+        raw = (ROOT / 'output_v1.4.json').read_bytes()
+        filename = 'output_v1.4.json (bundled)'
     else:
         st.info('Upload a JSON extraction to begin.')
         return
